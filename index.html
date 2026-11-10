@@ -144,6 +144,18 @@
   .promo{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
   .promo button{font-family:'Noto Sans Symbols 2';font-size:3rem;padding:8px 0;background:var(--light);color:#3a3550;-webkit-text-stroke:2px var(--ink);paint-order:stroke fill}
   .promo button.w{color:#fff}
+  .voice .vhead{display:flex;align-items:center;gap:12px;margin-bottom:10px}
+  .vav{border-radius:50%;flex:none;transition:box-shadow .1s}
+  .vav svg{width:58px;height:58px;border-radius:50%;display:block}
+  .talking{box-shadow:0 0 0 5px var(--green),0 0 0 8px var(--ink)}
+  .strip .badge{border-radius:50%;transition:box-shadow .1s}
+  .voice .vt{font-size:1.5rem;line-height:1}
+  .voice .vs{color:var(--muted);font-weight:600;font-size:.95rem}
+  .voice.live{background:#e4fbd9}
+  .vbtns{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .vbtns #vStart{grid-column:1/-1;background:var(--green)}
+  button.danger{background:var(--red);color:#fff}
+  #vMute.on{background:var(--orange)}
   .toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%) translateY(30px);background:var(--paper);color:var(--ink);border:var(--line);box-shadow:var(--pop);
          padding:12px 20px;border-radius:18px;font-weight:700;font-size:1.05rem;opacity:0;transition:all .25s;z-index:60;pointer-events:none;max-width:90vw;text-align:center}
   .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
@@ -166,6 +178,11 @@
   </div>
 
   <aside class="side">
+    <div class="card voice" id="voiceCard" style="display:none">
+      <div class="vhead"><span class="vav" id="vAv"></span><div><div class="comic vt">Sprachchat</div><div class="vs" id="vStatus"></div></div></div>
+      <div class="vbtns"><button id="vStart">🎤 Sprechen</button><button id="vMute">🔇 Stumm</button><button id="vEnd" class="danger">📞 Auflegen</button></div>
+      <audio id="ra" autoplay playsinline></audio>
+    </div>
     <div class="card toggle" id="helpToggle" role="switch" tabindex="0">
       <div>Hilfsmodus<small>Zeigt, wohin eine Figur ziehen darf</small></div>
       <div class="sw" id="helpSw"></div>
@@ -568,9 +585,11 @@ function renderConn() {
   if (!me) { dot.className = 'dot'; t.textContent = ''; return; }
   if (connected) { dot.className = 'dot ok'; t.textContent = `verbunden mit ${partner()}`; }
   else { dot.className = 'dot ' + (netState === 'error' ? 'err' : 'wait'); t.textContent = `warte auf ${partner()} …`; }
+  renderVoice();
 }
 
 function stopNet() {
+  if (typeof voice !== 'undefined' && (voice !== 'off' || incoming)) endVoice(true);
   clearTimeout(retryT); connected = false;
   try { if (conn) conn.close(); } catch (e) {}
   try { if (peer) peer.destroy(); } catch (e) {}
@@ -597,6 +616,7 @@ function onNetError(p, e, reopen) {
 function openWalter() {
   const p = new Peer(ID_WALTER); peer = p;
   p.on('open', () => { netState = 'open'; banner(''); renderConn(); });
+  p.on('call', c => onIncomingCall(c));
   p.on('connection', c => { if (conn && conn !== c) { try { conn.close(); } catch (e) {} } wireConn(c); });
   p.on('disconnected', () => { if (peer === p && !p.destroyed) retryT = setTimeout(() => { try { p.reconnect(); } catch (e) {} }, 2500); });
   p.on('error', e => {
@@ -615,6 +635,7 @@ function openWalter() {
 function openMarten() {
   const p = new Peer(); peer = p;
   p.on('open', () => connectToWalter());
+  p.on('call', c => onIncomingCall(c));
   p.on('disconnected', () => { if (peer === p && !p.destroyed) retryT = setTimeout(() => { try { p.reconnect(); } catch (e) {} }, 2500); });
   p.on('error', e => {
     if (peer !== p) return;
@@ -640,7 +661,9 @@ function wireConn(c) {
   c.on('data', d => { try { onMsg(d); } catch (e) { console.warn(e); } });
   const lost = () => {
     if (conn !== c) return;
-    conn = null; connected = false; renderConn();
+    conn = null; connected = false;
+    if (voice !== 'off' || incoming) endVoice(false);
+    renderConn();
     if (me === 'marten') { clearTimeout(retryT); retryT = setTimeout(connectToWalter, 2000); }
   };
   c.on('close', lost); c.on('error', lost);
@@ -650,6 +673,7 @@ function send(msg) { try { if (conn && conn.open) conn.send(msg); } catch (e) {}
 function sendState() { send({ type: 'state', game: G, from: me }); }
 
 function onMsg(d) {
+  if (d && d.type === 'voice') { onVoiceMsg(d); return; }
   if (!d || d.type !== 'state' || !valid(d.game)) return;
   const r = +d.game.rev || 0;
   // Neuerer Spielstand gewinnt; bei Gleichstand gilt Opas Stand
@@ -664,6 +688,157 @@ function onMsg(d) {
     sendState();                                  // der andere hat einen älteren Stand → unseren schicken
   }
 }
+
+
+/* ====================== Sprachchat (Audio über dieselbe Direktverbindung) ====================== */
+let mic = null, call = null, voice = 'off', muted = false, partnerMuted = false;
+let callTimeout = null, incoming = null, ringT = null, meterRaf = 0, meterSrc = null;
+
+function renderVoice() {
+  const card = $('voiceCard'); if (!card) return;
+  card.style.display = me ? '' : 'none'; if (!me) return;
+  $('vAv').innerHTML = avatar(OTHER[me]);
+  let s;
+  if (voice === 'on') s = muted ? 'Verbunden – du bist stumm' : (partnerMuted ? `${partner()} ist stumm` : 'Verbunden – ihr hört euch');
+  else if (voice === 'calling') s = `Rufe ${partner()} an …`;
+  else s = connected ? `Mit ${partner()} sprechen` : `${partner()} ist gerade nicht da`;
+  $('vStatus').textContent = s;
+  $('vStart').style.display = voice === 'off' ? '' : 'none';
+  $('vStart').disabled = !connected;
+  $('vMute').style.display = voice === 'on' ? '' : 'none';
+  $('vEnd').style.display = voice === 'off' ? 'none' : '';
+  $('vEnd').style.gridColumn = voice === 'calling' ? '1 / -1' : '';
+  $('vMute').classList.toggle('on', muted);
+  $('vMute').textContent = muted ? '🎤 Mikro an' : '🔇 Stumm';
+  card.classList.toggle('live', voice === 'on');
+}
+
+async function getMic() {
+  if (mic) return mic;
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) throw { name: 'NotSupported' };
+  mic = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }, video: false });
+  return mic;
+}
+function micError(e) {
+  const n = e && e.name;
+  dialog(`<h2>Mikrofon geht nicht</h2><p>${
+    n === 'NotAllowedError' ? 'Das Mikrofon wurde nicht erlaubt. Bitte in den Einstellungen des Tablets (bzw. beim Schloss-Symbol in der Adresszeile) das Mikrofon für diese Seite erlauben und es noch einmal versuchen.'
+    : n === 'NotFoundError' ? 'Auf diesem Gerät wurde kein Mikrofon gefunden.'
+    : 'Der Sprachchat funktioniert in diesem Browser leider nicht. Bitte Safari (iPad) oder Chrome (Android) verwenden.'}</p>
+    <div class="row"><button class="primary" id="dYes">Okay</button></div>`);
+  $('dYes').onclick = closeDialog;
+}
+
+async function startVoice() {
+  if (!connected || !conn || !peer) { toast(`${partner()} ist gerade nicht da.`); return; }
+  try { await getMic(); } catch (e) { micError(e); return; }
+  applyMute(false);
+  voice = 'calling'; renderVoice();
+  const c = peer.call(conn.peer, mic);
+  if (!c) { endVoice(false); toast('Anruf konnte nicht gestartet werden.'); return; }
+  wireCall(c);
+  send({ type: 'voice', state: 'ring' });
+  clearTimeout(callTimeout);
+  callTimeout = setTimeout(() => { if (voice === 'calling') { toast(`${partner()} geht gerade nicht ran.`); endVoice(true); } }, 35000);
+}
+
+function wireCall(c) {
+  if (call && call !== c) { try { call.close(); } catch (e) {} }
+  call = c;
+  c.on('stream', rs => {
+    if (call !== c) return;
+    const a = $('ra'); a.srcObject = rs; a.play().catch(() => {});
+    clearTimeout(callTimeout);
+    if (voice !== 'on') { voice = 'on'; toast('Sprachchat verbunden – ihr könnt euch jetzt hören!'); }
+    startMeter(rs); renderVoice();
+  });
+  const done = () => { if (call === c) { const was = voice; endVoice(false); if (was === 'on') toast(`${partner()} hat aufgelegt.`); } };
+  c.on('close', done); c.on('error', done);
+}
+
+function onIncomingCall(c) {
+  if (voice === 'on') { try { c.close(); } catch (e) {} return; }
+  if (voice === 'calling') {
+    // beide haben gleichzeitig angerufen: Opas Anruf gewinnt
+    if (me === 'walter') { try { c.close(); } catch (e) {} return; }
+    const old = call; call = null; try { old && old.close(); } catch (e) {}
+    c.answer(mic); wireCall(c); return;
+  }
+  incoming = c;
+  dialog(`<h2>${esc(partner())} ruft an!</h2>
+    <div class="choose" style="grid-template-columns:1fr"><button id="dAv" disabled style="opacity:1">${avatar(OTHER[me])}<small>möchte mit dir sprechen</small></button></div>
+    <div class="row"><button id="dNo">Ablehnen</button><button class="primary" id="dYes">🎤 Annehmen</button></div>`);
+  clearInterval(ringT); ping(); ringT = setInterval(ping, 1500);
+  $('dNo').onclick = () => { stopRing(); closeDialog(); try { c.close(); } catch (e) {} incoming = null; send({ type: 'voice', state: 'declined' }); };
+  $('dYes').onclick = async () => {
+    stopRing(); closeDialog(); incoming = null;
+    try { await getMic(); } catch (e) { try { c.close(); } catch (x) {} send({ type: 'voice', state: 'declined' }); micError(e); return; }
+    applyMute(false);
+    voice = 'calling'; renderVoice();
+    c.answer(mic); wireCall(c);
+    $('ra').play().catch(() => {});
+  };
+}
+function stopRing() { clearInterval(ringT); ringT = null; }
+
+function endVoice(notify) {
+  clearTimeout(callTimeout); stopRing();
+  if (incoming) { try { incoming.close(); } catch (e) {} incoming = null; if ($('dlg').querySelector('#dAv')) closeDialog(); }
+  if (call) { const c = call; call = null; try { c.close(); } catch (e) {} }
+  if (mic) { mic.getTracks().forEach(t => t.stop()); mic = null; }
+  const a = $('ra'); try { a.pause(); } catch (e) {} a.srcObject = null;
+  stopMeter();
+  voice = 'off'; muted = false; partnerMuted = false;
+  if (notify) send({ type: 'voice', state: 'off' });
+  renderVoice();
+}
+
+function applyMute(m) {
+  muted = m;
+  if (mic) mic.getAudioTracks().forEach(t => t.enabled = !m);
+  send({ type: 'voice', state: 'mute', muted: m });
+  renderVoice();
+}
+
+function onVoiceMsg(d) {
+  if (d.state === 'off') {
+    if (incoming) { endVoice(false); toast(`${partner()} hat aufgelegt.`); }
+    else if (voice !== 'off') { endVoice(false); toast(`${partner()} hat aufgelegt.`); }
+  } else if (d.state === 'declined') {
+    if (voice !== 'off') { endVoice(false); toast(`${partner()} möchte gerade nicht sprechen.`); }
+  } else if (d.state === 'mute') {
+    partnerMuted = !!d.muted; renderVoice();
+  }
+}
+
+/* zeigt, wer gerade spricht (grüner Ring um das Gesicht) */
+function startMeter(stream) {
+  stopMeter();
+  try {
+    if (!actx) actx = new (window.AudioContext || window.webkitAudioContext)();
+    const an = actx.createAnalyser(); an.fftSize = 512;
+    meterSrc = actx.createMediaStreamSource(stream); meterSrc.connect(an);
+    const buf = new Uint8Array(an.fftSize);
+    const loop = () => {
+      an.getByteTimeDomainData(buf);
+      let sum = 0; for (let i = 0; i < buf.length; i++) { const v = (buf[i] - 128) / 128; sum += v * v; }
+      const talking = Math.sqrt(sum / buf.length) > 0.04;
+      $('vAv').classList.toggle('talking', talking);
+      $('topBadge').classList.toggle('talking', talking);
+      meterRaf = requestAnimationFrame(loop);
+    };
+    loop();
+  } catch (e) {}
+}
+function stopMeter() {
+  cancelAnimationFrame(meterRaf); meterRaf = 0;
+  try { meterSrc && meterSrc.disconnect(); } catch (e) {} meterSrc = null;
+  $('vAv').classList.remove('talking'); $('topBadge').classList.remove('talking');
+}
+
+$('vStart').onclick = startVoice;
+$('vEnd').onclick = () => endVoice(true);
+$('vMute').onclick = () => applyMute(!muted);
 
 /* ====================== Start ====================== */
 (function boot() {
