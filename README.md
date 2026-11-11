@@ -1,6 +1,6 @@
-# ♞ Familienschach
+# ♞ Familienschach – Opa Walter gegen Marten
 
-Online-Schach für zwei Tablets – z. B. für Enkel und Opa.
+Online-Schach für zwei Tablets.
 Figur antippen, dann Zielfeld antippen. Der **Hilfsmodus** zeigt mit grünen Punkten,
 wohin eine Figur ziehen darf.
 
@@ -12,7 +12,9 @@ wohin eine Figur ziehen darf.
    - **Public** auswählen (für kostenloses GitHub Pages nötig)
    - **Create repository** klicken.
 3. Auf der neuen Seite **„uploading an existing file“** anklicken,
-   die Dateien `index.html` und `README.md` hineinziehen und **Commit changes** klicken.
+   **alle Dateien** hineinziehen (`index.html`, `README.md`, `manifest.webmanifest`,
+   `favicon.png`, `apple-touch-icon.png`, `icon-192.png`, `icon-512.png`)
+   und **Commit changes** klicken.
 4. Im Repository auf **Settings → Pages** gehen.
    - Bei *Source*: **Deploy from a branch**
    - Bei *Branch*: **main** und **/ (root)** wählen → **Save**
@@ -20,28 +22,44 @@ wohin eine Figur ziehen darf.
    `https://DEIN-BENUTZERNAME.github.io/familienschach/`
 
 Tipp: Die Adresse auf beiden Tablets öffnen und über „Teilen → Zum Home-Bildschirm“
-als App-Symbol ablegen.
+als App-Symbol ablegen – dann erscheint das Symbol mit Opa und Marten.
 
 ## So wird gespielt
 
-1. **Tablet 1:** „Neues Spiel starten“ → Farbe und Namen wählen.
-   Es erscheint ein **6-stelliger Spielcode** und ein Einladungslink.
-2. **Tablet 2:** Den Link öffnen **oder** „Einem Spiel beitreten“ wählen und den Code eingeben.
-3. Sobald oben „verbunden“ steht, kann es losgehen. Weiß beginnt.
+1. Beim ersten Öffnen fragt jedes Tablet: **„Wer spielt auf diesem Tablet?“**
+   → einmal **Opa Walter** bzw. **Marten** antippen. Das Tablet merkt sich die Auswahl.
+2. Die Tablets finden sich automatisch. Oben rechts steht, ob der andere gerade
+   online ist („Opa Walter ist online“ / „… ist offline“).
+3. **Es müssen nicht beide gleichzeitig online sein:** Wer am Zug ist, zieht einfach –
+   der andere sieht den Zug, sobald er das Spiel das nächste Mal öffnet.
+4. Bei **„Neue Partie“** wird gefragt, wer mit Weiß spielt (und anfängt).
 
-- Jedes Tablet sieht seine eigenen Figuren unten.
+- Jeder sieht seine eigenen Figuren unten.
 - Hat der andere gezogen, ertönt ein leiser Ton.
 - „Zug zurück“ und „Neue Partie“ wirken auf beiden Tablets.
-- Wird die Seite geschlossen, bleibt die Partie gespeichert. Beim nächsten Öffnen
-  verbindet sich das Tablet automatisch wieder. Dafür muss das Tablet, das das Spiel
-  gestartet hat, ebenfalls geöffnet sein.
-- „Zu zweit an diesem Tablet“ funktioniert auch ganz ohne Internet.
+- Die Partie bleibt gespeichert, auch wenn die Seite geschlossen wird.
+- Falsche Person gewählt? Unten auf **„Person wechseln“** tippen.
+
+## Sprachchat
+
+- Rechts im Spiel auf **„🎤 Sprechen“** tippen. Auf dem anderen Tablet erscheint
+  „… ruft an!“ – dort auf **Annehmen** tippen.
+- Beim ersten Mal fragt das Tablet, ob die Seite das **Mikrofon** benutzen darf → **Erlauben**.
+- Während des Gesprächs: **Stumm** schaltet das eigene Mikrofon aus, **Auflegen** beendet das Gespräch.
+  Ein grüner Ring um das Gesicht zeigt, wenn der andere gerade spricht.
+- Tipp: Mit Kopfhörern gibt es kein Echo.
+- Das Gespräch läuft direkt von Tablet zu Tablet und wird nirgends gespeichert.
 
 ## Technik
 
-- Eine einzige Datei (`index.html`), kein Server und kein Konto nötig.
-- Die Tablets verbinden sich direkt miteinander (WebRTC über die freie Bibliothek
-  [PeerJS](https://peerjs.com) und deren kostenlosen Vermittlungsserver).
-- Es werden nur die Züge und die Namen übertragen.
+- Eine Webseite (`index.html`), kein eigener Server und kein Konto nötig.
+- Die Züge laufen verschlüsselt über **zwei kostenlose öffentliche Nachrichtenserver**
+  (EMQX und HiveMQ, MQTT über sichere WebSockets) gleichzeitig. Fällt einer aus, läuft
+  alles über den anderen weiter. Der letzte Spielstand bleibt dort gespeichert.
+- Der **Sprachchat** ist eine direkte Verbindung zwischen den Tablets (WebRTC). In sehr
+  seltenen Netzen (z. B. manche Firmen- oder Hotel-WLANs) kommt er nicht zustande –
+  das Spiel funktioniert dann trotzdem.
+- Bei Problemen: unten auf **„Person wechseln“** tippen – dort steht, welcher Server
+  erreichbar ist und ob der andere online ist.
 - Vollständige Schachregeln: Rochade, en passant, Bauernumwandlung, Schach, Matt, Patt,
   50-Züge-Regel, dreifache Stellungswiederholung.
