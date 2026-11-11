@@ -108,18 +108,27 @@
 
   /* Seitenleiste */
   .side{display:flex;flex-direction:column;gap:14px;width:100%;max-width:var(--bs);min-width:0}
-  @media (min-aspect-ratio: 1/1) and (min-width: 700px){ .side{max-width:330px;height:calc(var(--bs) + 152px)} }
+  @media (min-aspect-ratio: 1/1) and (min-width: 700px){ .side{max-width:330px} }
   .card{background:var(--paper);border:var(--line);border-radius:18px;padding:12px 14px;box-shadow:var(--pop)}
   .toggle{display:flex;align-items:center;justify-content:space-between;gap:12px;font-family:Bangers,Impact,sans-serif;letter-spacing:.06em;font-size:1.5rem;cursor:pointer}
   .toggle small{display:block;font-family:Fredoka,sans-serif;letter-spacing:0;font-weight:500;color:var(--muted);font-size:.9rem}
   .sw{width:64px;height:36px;border-radius:18px;background:#d8d2c4;border:3px solid var(--ink);position:relative;flex:none;transition:background .2s}
   .sw::after{content:"";position:absolute;top:3px;left:3px;width:24px;height:24px;border-radius:50%;background:#fff;border:3px solid var(--ink);transition:left .2s}
   .sw.on{background:var(--green)} .sw.on::after{left:31px}
-  .moves{flex:1;min-height:100px;max-height:220px;overflow:auto;display:flex;flex-direction:column}
-  @media (min-aspect-ratio: 1/1) and (min-width: 700px){ .moves{max-height:none} }
-  .moves h3{margin:0 0 6px;font-family:Bangers,Impact,sans-serif;font-weight:400;letter-spacing:.08em;font-size:1.5rem}
-  .mlist{display:grid;grid-template-columns:2.2em 1fr 1fr;gap:3px 6px;font-size:1.05rem;font-weight:600;font-variant-numeric:tabular-nums}
-  .mlist .n{color:var(--muted)} .mlist .lastm{background:var(--sun);border:2px solid var(--ink);border-radius:6px;padding:0 4px;margin:-2px -6px}
+  .score h3{margin:0 0 8px;font-family:Bangers,Impact,sans-serif;font-weight:400;letter-spacing:.08em;font-size:1.5rem}
+  .tally{width:100%;border-collapse:separate;border-spacing:0 8px;margin:-6px 0 -4px;table-layout:auto}
+  .tally th{font-family:Bangers,Impact,sans-serif;font-weight:400;letter-spacing:.02em;font-size:.82rem;color:var(--muted);padding:0 1px;text-align:center}
+  .tally td{text-align:center;padding:0 2px}
+  .tally td.who{text-align:left;white-space:nowrap}
+  .tally td.who span{display:inline-flex;align-items:center;gap:6px;font-family:Bangers,Impact,sans-serif;letter-spacing:.04em;font-size:1.1rem}
+  .tally td.who svg{width:34px;height:34px;border-radius:50%;flex:none}
+  .num{display:inline-block;min-width:1.8em;padding:2px 4px;border:3px solid var(--ink);border-radius:10px;box-shadow:2px 2px 0 var(--ink);
+       font-family:Bangers,Impact,sans-serif;font-size:1.35rem;letter-spacing:.03em;line-height:1.1;background:#fff}
+  .num.w{background:var(--green)} .num.d{background:var(--sun)} .num.l{background:#ff9a8f}
+  .tally tr.lead .num.w{animation:wiggle 1.6s ease-in-out infinite}
+  .games{font-size:.95rem;font-weight:600;color:var(--muted);text-align:center;margin-top:4px}
+  .num.bump{animation:bump .7s cubic-bezier(.2,1.8,.4,1)}
+  @keyframes bump{0%{transform:scale(1)}40%{transform:scale(1.5) rotate(-8deg)}100%{transform:scale(1)}}
   .empty{color:var(--muted)}
   .btns{display:grid;grid-template-columns:1fr 1fr;gap:12px}
   button{font-family:Bangers,Impact,sans-serif;letter-spacing:.06em;font-size:1.3rem;border:var(--line);border-radius:14px;padding:10px;
@@ -188,9 +197,13 @@
       <div>Hilfsmodus<small>Zeigt, wohin eine Figur ziehen darf</small></div>
       <div class="sw" id="helpSw"></div>
     </div>
-    <div class="card moves">
-      <h3>Züge</h3>
-      <div id="mlist" class="mlist"></div>
+    <div class="card score">
+      <h3>Spielstand</h3>
+      <table class="tally">
+        <thead><tr><th></th><th>Gewonnen</th><th>Remis</th><th>Verloren</th></tr></thead>
+        <tbody id="tallyBody"></tbody>
+      </table>
+      <div class="games" id="gamesCount"></div>
     </div>
     <div class="btns">
       <button id="btnUndo">↶ Zug zurück</button>
@@ -340,7 +353,7 @@ const store = {
 
 const freshGame = (whiteWho) => {
   const w = whiteWho === 'walter' ? 'walter' : 'marten';
-  return Object.assign(newGame({ w, b: OTHER[w] }), { rev: 0 });
+  return Object.assign(newGame({ w, b: OTHER[w] }), { rev: 0, archive: [] });
 };
 let G = freshGame('marten');
 let me = null;                       // 'walter' | 'marten'
@@ -420,21 +433,46 @@ function render() {
   $('stripTop').classList.toggle('active', !!me && !st.over && pos.t === top);
   $('stripBot').classList.toggle('active', !!me && !st.over && pos.t === bottom);
 
-  const ml = $('mlist');
-  if (!G.moves.length) ml.innerHTML = `<div class="empty" style="grid-column:1/-1">Noch keine Züge. ${esc(nameOf('w'))} beginnt mit Weiß.</div>`;
-  else {
-    let h = '';
-    for (let k = 0; k < G.moves.length; k += 2) {
-      const lw = k === G.moves.length - 1, lb = k + 1 === G.moves.length - 1;
-      h += `<span class="n">${k / 2 + 1}.</span><span class="${lw ? 'lastm' : ''}">${esc(G.moves[k])}</span><span class="${lb ? 'lastm' : ''}">${esc(G.moves[k + 1] || '')}</span>`;
-    }
-    ml.innerHTML = h; ml.parentElement.scrollTop = 1e6;
-  }
+  renderTally();
 
   $('helpSw').classList.toggle('on', help);
   $('btnUndo').disabled = !me || !G.moves.length;
   $('btnNew').disabled = !me;
   renderConn();
+}
+
+/* ====================== Spielstand (gewonnen / remis / verloren) ======================
+   Abgeschlossene Partien stehen in G.archive. Die laufende Partie zählt mit, sobald sie
+   beendet ist – wird der letzte Zug zurückgenommen, fällt sie automatisch wieder heraus. */
+function resultOf(g) {                       // Ergebnis der laufenden Partie oder null
+  const st = statusOf(g.pos, g.hist);
+  if (!st.over || !g.moves.length) return null;
+  return { w: g.players.w, b: g.players.b, r: st.kind === 'mate' ? (st.winner === 'w' ? '1-0' : '0-1') : '½', t: Date.now() };
+}
+function tally() {
+  const t = { walter: { w: 0, d: 0, l: 0 }, marten: { w: 0, d: 0, l: 0 } };
+  const add = g => {
+    if (!t[g.w] || !t[g.b]) return;
+    if (g.r === '½') { t[g.w].d++; t[g.b].d++; }
+    else { const win = g.r === '1-0' ? g.w : g.b; t[win].w++; t[OTHER[win]].l++; }
+  };
+  (G.archive || []).forEach(add);
+  const cur = resultOf(G); if (cur) add(cur);
+  return t;
+}
+let lastTallyKey = '';
+function renderTally() {
+  const t = tally(), order = ['marten', 'walter'];
+  const lead = t.marten.w === t.walter.w ? null : (t.marten.w > t.walter.w ? 'marten' : 'walter');
+  const key = JSON.stringify(t), bump = lastTallyKey && lastTallyKey !== key;
+  const prev = lastTallyKey ? JSON.parse(lastTallyKey) : null;
+  $('tallyBody').innerHTML = order.map(who => `<tr class="${who === lead ? 'lead' : ''}">
+      <td class="who"><span>${avatar(who)}${esc(PEOPLE[who])}</span></td>
+      ${['w', 'd', 'l'].map(k => `<td><span class="num ${k}${bump && prev && prev[who][k] !== t[who][k] ? ' bump' : ''}">${t[who][k]}</span></td>`).join('')}
+    </tr>`).join('');
+  const n = t.marten.w + t.marten.d + t.marten.l;
+  $('gamesCount').textContent = n === 0 ? 'Noch keine Partie beendet.' : (n === 1 ? '1 Partie gespielt' : `${n} Partien gespielt`);
+  lastTallyKey = key;
 }
 
 /* ====================== Bedienung ====================== */
@@ -469,7 +507,7 @@ function onSquare(d) {
 }
 
 function commit(next) {
-  G = Object.assign({}, next, { rev: (G.rev || 0) + 1, ts: Date.now() });
+  G = Object.assign({ archive: G.archive || [] }, next, { rev: (G.rev || 0) + 1, ts: Date.now() });
   sel = -1; targets = [];
   persist(); render(); sendState();
 }
@@ -519,7 +557,9 @@ $('btnUndo').onclick = () => {
   });
 };
 $('btnNew').onclick = () => {
-  dialog(`<h2>Neue Partie</h2><p>Wer spielt mit Weiß und fängt an?</p>
+  const done = resultOf(G);
+  const note = done ? '' : (G.moves.length ? '<br><b>Achtung:</b> Die laufende Partie ist noch nicht zu Ende und wird nicht gewertet.' : '');
+  dialog(`<h2>Neue Partie</h2><p>Wer spielt mit Weiß und fängt an?${note}</p>
     <div class="choose">
       <button data-w="marten">${avatar('marten')}Marten<small>spielt Weiß</small></button>
       <button data-w="walter">${avatar('walter')}Opa Walter<small>spielt Weiß</small></button>
@@ -527,7 +567,9 @@ $('btnNew').onclick = () => {
     <div class="row"><button id="dNo">Abbrechen</button></div>`);
   $('dNo').onclick = closeDialog;
   $('dlg').querySelectorAll('[data-w]').forEach(b => b.onclick = () => {
-    closeDialog(); const g = freshGame(b.dataset.w); commit(g);
+    closeDialog();
+    const archive = (G.archive || []).concat(done ? [done] : []).slice(-2000);
+    commit(Object.assign(freshGame(b.dataset.w), { archive }));
     toast(`Neue Partie: ${PEOPLE[b.dataset.w]} spielt Weiß.`);
   });
 };
@@ -589,12 +631,15 @@ function valid(d) {
   return d && d.pos && typeof d.pos.b === 'string' && d.pos.b.length === 64 && /^[.prnbqkPRNBQK]+$/.test(d.pos.b) &&
          (d.pos.t === 'w' || d.pos.t === 'b') && Array.isArray(d.moves) && Array.isArray(d.hist) &&
          d.hist.every(h => h && typeof h.b === 'string' && h.b.length === 64) &&
-         d.players && PEOPLE[d.players.w] && PEOPLE[d.players.b] && d.players.w !== d.players.b;
+         d.players && PEOPLE[d.players.w] && PEOPLE[d.players.b] && d.players.w !== d.players.b &&
+         (d.archive === undefined || Array.isArray(d.archive));
 }
 function normalize(d) {
   return { pos: Object.assign({ c: '', ep: -1, hm: 0 }, d.pos), hist: d.hist.slice(), moves: d.moves.map(String),
            last: Array.isArray(d.last) ? d.last.slice(0, 2) : null,
-           players: { w: d.players.w, b: d.players.b }, rev: +d.rev || 0, ts: +d.ts || 0 };
+           players: { w: d.players.w, b: d.players.b }, rev: +d.rev || 0, ts: +d.ts || 0,
+           archive: (d.archive || []).filter(g => g && PEOPLE[g.w] && PEOPLE[g.b] && g.w !== g.b && ['1-0', '0-1', '½'].includes(g.r))
+                                     .map(g => ({ w: g.w, b: g.b, r: g.r, t: +g.t || 0 })) };
 }
 function persist() { store.set('fs.game', G); }
 // Welcher Spielstand ist neuer? (>0: a neuer)

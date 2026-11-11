@@ -40,6 +40,14 @@ als App-Symbol ablegen – dann erscheint das Symbol mit Opa und Marten.
 - Die Partie bleibt gespeichert, auch wenn die Seite geschlossen wird.
 - Falsche Person gewählt? Unten auf **„Person wechseln“** tippen.
 
+## Spielstand
+
+Rechts steht für Opa Walter und Marten, wie viele Partien jeder **gewonnen**, **remis**
+gespielt und **verloren** hat. Eine Partie zählt, sobald sie mit Matt oder Remis endet.
+Wird der letzte Zug zurückgenommen, wird sie wieder herausgerechnet. Wer mitten in einer
+Partie auf „Neue Partie“ tippt, beendet sie ohne Wertung. Der Spielstand ist auf beiden
+Tablets gleich und bleibt gespeichert.
+
 ## Sprachchat
 
 - Rechts im Spiel auf **„🎤 Sprechen“** tippen. Auf dem anderen Tablet erscheint
